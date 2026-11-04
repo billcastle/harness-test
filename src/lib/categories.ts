@@ -20,3 +20,18 @@ export function categorize(description: string): Category {
   for (const [cat, re] of RULES) if (re.test(description)) return cat;
   return "Other";
 }
+
+export const FALLBACK_CATEGORY = "Other";
+
+/** Validates a user-edited category list; returns the cleaned list, or null when it is unusable. */
+export function cleanCategories(input: unknown): string[] | null {
+  if (!Array.isArray(input) || input.length > 30) return null;
+  const out: string[] = [];
+  for (const v of input) {
+    if (typeof v !== "string") return null;
+    const name = v.trim().replace(/\s+/g, " ");
+    if (!name || name.length > 30) return null;
+    if (!out.some((o) => o.toLowerCase() === name.toLowerCase())) out.push(name);
+  }
+  return out.includes(FALLBACK_CATEGORY) ? out : null; // "Other" is where removed categories' expenses go
+}

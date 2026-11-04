@@ -1,14 +1,13 @@
 "use client";
-import { CATEGORIES } from "@/lib/categories";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-const items = CATEGORIES.map((c) => ({ value: c, label: c }));
-
-export function CategorySelect({ value, onChange, small }: { value: string; onChange: (v: string) => void; small?: boolean }) {
+export function CategorySelect({ categories, value, onChange, className }: { categories: string[]; value: string; onChange: (v: string) => void; className?: string }) {
+  const items = categories.map((c) => ({ value: c, label: c }));
   return (
     <Select items={items} value={value} onValueChange={(v) => v && onChange(v)}>
-      <SelectTrigger size={small ? "sm" : "default"} className={small ? "w-36" : "w-full"} aria-label="Category"><SelectValue /></SelectTrigger>
-      <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+      <SelectTrigger className={cn("w-full", className)} aria-label="Category"><SelectValue /></SelectTrigger>
+      <SelectContent>{items.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
     </Select>
   );
 }

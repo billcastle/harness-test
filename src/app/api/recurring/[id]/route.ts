@@ -1,6 +1,6 @@
 import { isAuthed } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { CATEGORIES } from "@/lib/categories";
+import { getCategories } from "@/lib/settings";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,7 +12,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
   const day = Number(b?.day);
   const valid =
     typeof b?.description === "string" && b.description.trim() && Number.isFinite(cents) && cents > 0 &&
-    Number.isInteger(day) && day >= 1 && day <= 31 && (CATEGORIES as readonly string[]).includes(b?.category);
+    Number.isInteger(day) && day >= 1 && day <= 31 && (await getCategories()).includes(b?.category);
   if (!valid) return Response.json({ error: "Invalid recurring expense" }, { status: 400 });
   await (await db()).execute({
     sql: "UPDATE recurring SET description = ?, amount_cents = ?, category = ?, day = ? WHERE id = ?",

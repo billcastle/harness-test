@@ -1,6 +1,6 @@
 import { isAuthed } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { CATEGORIES } from "@/lib/categories";
+import { getCategories } from "@/lib/settings";
 import { FREQUENCIES } from "@/lib/amortize";
 import { materializeRecurring } from "@/lib/recurring";
 
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   const cents = Math.round(Number(b?.amount) * 100);
   const valid =
     ISO.test(b?.date) && Number.isFinite(cents) && cents > 0 && String(b?.description ?? "").trim() !== "" &&
-    (CATEGORIES as readonly string[]).includes(b?.category);
+    (await getCategories()).includes(b?.category);
   if (!valid) return Response.json({ error: "Invalid expense" }, { status: 400 });
   const frequency = b.frequency ?? "monthly";
   if (!(FREQUENCIES as readonly string[]).includes(frequency)) return Response.json({ error: "Invalid frequency" }, { status: 400 });

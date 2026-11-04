@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { extractText, getDocumentProxy } from "unpdf";
 import { isAuthed } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { categorize } from "@/lib/categories";
+import { categorize, FALLBACK_CATEGORY } from "@/lib/categories";
+import { getCategories } from "@/lib/settings";
 import { parseCsv, parseStatementText, type RawTx } from "@/lib/parse";
 
 export const maxDuration = 30;
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
   }
 
   const client = await db();
+  const categories = await getCategories();
   const seen = new Map<string, number>();
   let added = 0;
   for (const t of charges) {
@@ -41,7 +43,7 @@ export async function POST(req: Request) {
     const hash = createHash("sha1").update(`${key}|${n}`).digest("hex");
     const r = await client.execute({
       sql: "INSERT OR IGNORE INTO expenses (date, description, amount_cents, category, hash) VALUES (?,?,?,?,?)",
-      args: [t.date, t.description, t.amount_cents, categorize(t.description), hash],
+      args: [t.date, t.description, t.amount_cents, categories.includes(categorize(t.description)) ? categorize(t.description) : FALLBACK_CATEGORY, hash],
     });
     added += r.rowsAffected;
   }

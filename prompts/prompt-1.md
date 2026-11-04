@@ -35,3 +35,20 @@ Fix these:
 - Settings still uses the browser's confirm() when you delete a recurring expense.
 - in add expense form, make note label to "Title" make it required
 - Fix mobile ui for the list of transactions - do a card design; make the title bigger
+
+---
+
+- make form fields in add expense bigger, spacier
+- manual and upload statement should be a toggle switch component
+- repeats field should be a group of radio buttons
+- the cost in transaction list should be aligned in mobile view. currently, if it's a recurring item cost alignment is off
+- modify card design to have two columns:
+-----------------------------------
+| date                  category  |
+| title                 cost      |
+|           edit icon delete icon |
+-----------------------------------
+- where date and category are small subtexts
+- clicking edit should show a modal to edit the entry 
+- add in setting for user to add/remove category
+- fix spacing; add more white space

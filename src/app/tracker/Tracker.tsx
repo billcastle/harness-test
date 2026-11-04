@@ -1,19 +1,18 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Flame, Lock, Plus, Settings, Trash2 } from "lucide-react";
+import { CalendarDays, Flame, Lock, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { fmtDate, fmtMonth, todayISO } from "@/lib/dates";
 import { formatMoney } from "@/lib/currency";
 import { FREQUENCY_LABEL, periodShareCents, type Frequency } from "@/lib/amortize";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DatePicker, RangePicker } from "@/components/date-picker";
-import { CATEGORY_STYLE, CategoryIcon } from "@/components/category-icon";
-import type { Category } from "@/lib/categories";
+import { CategoryIcon, categoryStyle } from "@/components/category-icon";
 import AddExpenseDialog from "./AddExpenseDialog";
 import SettingsDialog from "./SettingsDialog";
-import { CategorySelect } from "./CategorySelect";
+import EditExpenseDialog from "./EditExpenseDialog";
 
 type Expense = { id: number; date: string; description: string; amount_cents: number; category: string };
 const UNDO_MS = 6000;
@@ -22,10 +21,12 @@ type Row = Expense & { share?: Frequency };
 type RecurringItem = { id: number; description: string; amount_cents: number; category: string; start_date: string; frequency: Frequency };
 type Mode = "month" | "day" | "range";
 
-export default function Tracker({ initialCurrency }: { initialCurrency: string }) {
+export default function Tracker({ initialCurrency, initialCategories }: { initialCurrency: string; initialCategories: string[] }) {
   const router = useRouter();
   const [all, setAll] = useState<Expense[]>([]);
   const [currency, setCurrency] = useState(initialCurrency);
+  const [categories, setCategories] = useState(initialCategories);
+  const [editing, setEditing] = useState<Expense | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [recs, setRecs] = useState<RecurringItem[]>([]);
@@ -100,11 +101,6 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
   const monthItems = (months.length ? months : [activeMonth]).map((m) => ({ value: m, label: fmtMonth(m) }));
 
   const onAdded = (ym?: string) => { if (ym) { setMode("month"); setMonth(ym); } load(); };
-  const setCategory = async (id: number, category: string) => {
-    setAll((a) => a.map((x) => (x.id === id ? { ...x, category } : x)));
-    const res = await fetch(`/api/expenses/${id}`, { method: "PATCH", body: JSON.stringify({ category }) }).catch(() => null);
-    if (!res?.ok) load(); // resync so the UI doesn't show a change that wasn't saved
-  };
   const remove = (e: Expense) => {
     if (pendingRef.current) { clearTimeout(undoTimer.current); commitDelete(pendingRef.current); }
     pendingRef.current = e;
@@ -123,7 +119,7 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
   const logout = async () => { await fetch("/api/logout", { method: "POST" }); router.replace("/"); };
 
   return (
-    <main className="mx-auto grid max-w-3xl gap-4 p-4 pb-16">
+    <main className="mx-auto grid max-w-3xl gap-6 p-4 pb-24 sm:p-8 sm:pb-24">
       <header className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold">Expense Tracker</h1>
         <div className="flex gap-2">
@@ -141,7 +137,7 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
       )}
 
       <Card>
-        <CardHeader className="gap-3">
+        <CardHeader className="gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex gap-1" role="group" aria-label="Summary period">
               {(["month", "day", "range"] as Mode[]).map((m) => (
@@ -160,15 +156,15 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
             {mode === "range" && <RangePicker from={range.from} to={range.to} onChange={(f, t) => setRange({ from: f, to: t })} />}
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg bg-muted p-4">
+        <CardContent className="grid gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1 rounded-lg bg-muted p-5">
               <div className="text-sm text-muted-foreground">Total spent · {periodLabel}</div>
               <div className="text-3xl font-semibold tabular-nums">{money(total)}</div>
               <div className="text-sm text-muted-foreground">{realRows.length} transaction{realRows.length === 1 ? "" : "s"}{shares.length > 0 && ` + ${shares.length} recurring`}</div>
             </div>
             {mode !== "day" && (
-              <div className="rounded-lg bg-muted p-4">
+              <div className="grid gap-1 rounded-lg bg-muted p-5">
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground"><Flame className="size-4 text-primary" /> Most expensive day</div>
                 {topDay ? (
                   <>
@@ -180,7 +176,7 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
             )}
           </div>
 
-          <div className="grid gap-3">
+          <div className="grid gap-4">
             {loaded && byCat.length === 0 && <p className="text-sm text-muted-foreground">No expenses for this period. Use “Add expense” to upload a statement or enter one.</p>}
             {byCat.map(([cat, c]) => (
               <div key={cat} className="flex items-center gap-3">
@@ -191,7 +187,7 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
                     <span className="tabular-nums">{money(c)} <span className="text-muted-foreground">· {Math.round((c / total) * 100)}%</span></span>
                   </div>
                   <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
-                    <div className={`h-full rounded-full ${CATEGORY_STYLE[cat as Category]?.bar ?? "bg-primary"}`} style={{ width: `${(c / total) * 100}%` }} />
+                    <div className={`h-full rounded-full ${categoryStyle(cat).bar}`} style={{ width: `${(c / total) * 100}%` }} />
                   </div>
                 </div>
               </div>
@@ -200,32 +196,33 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
         </CardContent>
       </Card>
 
-      <Card className="max-sm:bg-transparent max-sm:py-0 max-sm:ring-0 sm:py-(--card-spacing)">
-        <CardHeader className="max-sm:px-0"><CardTitle className="flex items-center gap-2"><CalendarDays className="size-4" /> Transactions · {periodLabel}</CardTitle></CardHeader>
-        <CardContent className="grid gap-3 max-sm:px-0 sm:gap-0">
+      <section className="grid gap-4" aria-labelledby="tx-heading">
+        <h2 id="tx-heading" className="flex items-center gap-2 text-base font-medium"><CalendarDays className="size-4" /> Transactions · {periodLabel}</h2>
+        <ul className="grid gap-4">
           {rows.map((e) => (
-            <div key={e.id} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[6.5rem_1fr_auto_auto] sm:gap-y-1 sm:rounded-none sm:bg-transparent sm:p-0 sm:py-2 sm:ring-0 sm:border-t sm:first:border-t-0">
-              <span className="order-3 text-sm text-muted-foreground sm:order-none">{e.share ? `${FREQUENCY_LABEL[e.share]} share` : fmtDate(e.date)}</span>
-              <span className="order-1 flex min-w-0 items-center gap-2.5 sm:order-none" title={e.description}>
-                <CategoryIcon category={e.category} className="size-8 shrink-0 sm:size-6 [&_svg]:size-4 sm:[&_svg]:size-3.5" />
-                <span className="line-clamp-2 text-base font-semibold sm:truncate sm:text-sm sm:font-normal">{e.description}</span>
+            <li key={e.id} className="grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1.5 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+              <span className="text-xs text-muted-foreground">{e.share ? `${FREQUENCY_LABEL[e.share]} share` : fmtDate(e.date)}</span>
+              <span className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground">
+                <CategoryIcon category={e.category} className="size-5 [&_svg]:size-3" />
+                {e.category}
               </span>
-              <strong className="order-2 text-base tabular-nums sm:order-none sm:text-sm">{money(e.amount_cents)}</strong>
-              <div className="order-4 flex items-center justify-end gap-1 sm:order-none">
+              <span className="line-clamp-2 min-w-0 text-base font-semibold" title={e.description}>{e.description}</span>
+              <strong className="text-right text-base tabular-nums">{money(e.amount_cents)}</strong>
+              <div className="col-span-2 mt-2 flex items-center justify-end gap-1">
                 {e.share ? (
-                  <span className="text-sm text-muted-foreground">{e.category} · edit in Settings</span>
+                  <span className="text-xs text-muted-foreground">Recurring · edit in Settings</span>
                 ) : (
                   <>
-                    <CategorySelect small value={e.category} onChange={(c) => setCategory(e.id, c)} />
-                    <Button variant="ghost" size="icon-sm" onClick={() => remove(e)} aria-label={`Delete ${e.description}`}><Trash2 /></Button>
+                    <Button variant="ghost" size="icon" onClick={() => setEditing(e)} aria-label={`Edit ${e.description}`}><Pencil /></Button>
+                    <Button variant="ghost" size="icon" onClick={() => remove(e)} aria-label={`Delete ${e.description}`}><Trash2 /></Button>
                   </>
                 )}
               </div>
-            </div>
+            </li>
           ))}
-          {loaded && rows.length === 0 && <p className="text-sm text-muted-foreground">Nothing here.</p>}
-        </CardContent>
-      </Card>
+        </ul>
+        {loaded && rows.length === 0 && <p className="text-sm text-muted-foreground">Nothing here.</p>}
+      </section>
 
       {undo && (
         <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-xl bg-foreground p-3 pl-4 text-sm text-background shadow-lg">
@@ -234,8 +231,9 @@ export default function Tracker({ initialCurrency }: { initialCurrency: string }
         </div>
       )}
 
-      <AddExpenseDialog open={addOpen} onOpenChange={setAddOpen} currency={currency} onChanged={onAdded} />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} currency={currency} onCurrency={setCurrency} onChanged={load} />
+      <AddExpenseDialog open={addOpen} onOpenChange={setAddOpen} currency={currency} categories={categories} onChanged={onAdded} />
+      <EditExpenseDialog expense={editing} onClose={() => setEditing(null)} currency={currency} categories={categories} onSaved={load} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} currency={currency} onCurrency={setCurrency} categories={categories} onCategories={setCategories} onChanged={load} />
     </main>
   );
 }

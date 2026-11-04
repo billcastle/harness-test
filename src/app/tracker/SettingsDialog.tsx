@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { CURRENCIES, formatMoney } from "@/lib/currency";
 import type { Frequency } from "@/lib/amortize";
 import { fmtDate } from "@/lib/dates";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryIcon } from "@/components/category-icon";
+import { FALLBACK_CATEGORY } from "@/lib/categories";
 import { ThemeChoice } from "../ThemeToggle";
 import { CategorySelect } from "./CategorySelect";
 
@@ -24,28 +25,54 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   currency: string;
   onCurrency: (currency: string) => void;
+  categories: string[];
+  onCategories: (categories: string[]) => void;
   /** Called when a recurring expense was edited or deleted. */
   onChanged: () => void;
 };
 
-export default function SettingsDialog({ open, onOpenChange, currency, onCurrency, onChanged }: Props) {
+export default function SettingsDialog({ open, onOpenChange, currency, onCurrency, categories, onCategories, onChanged }: Props) {
   const [recs, setRecs] = useState<Rec[] | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>({ description: "", amount: "", category: "Other", day: "1" });
   const [confirming, setConfirming] = useState<number | null>(null);
+  const [newCategory, setNewCategory] = useState("");
+  const [removingCategory, setRemovingCategory] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const loadRecs = useCallback(async () => {
     const res = await fetch("/api/recurring");
     if (res.ok) setRecs(await res.json());
   }, []);
-  useEffect(() => { if (open) { setEditing(null); setConfirming(null); setError(""); loadRecs(); } }, [open, loadRecs]);
+  useEffect(() => { if (open) { setEditing(null); setConfirming(null); setRemovingCategory(null); setError(""); loadRecs(); } }, [open, loadRecs]);
 
   async function pickCurrency(c: string) {
     const prev = currency;
     onCurrency(c);
     const res = await fetch("/api/settings", { method: "PUT", body: JSON.stringify({ currency: c }) });
     if (!res.ok) { onCurrency(prev); setError("Could not save currency"); }
+  }
+
+  async function saveCategories(next: string[]) {
+    const res = await fetch("/api/settings", { method: "PUT", body: JSON.stringify({ categories: next }) }).catch(() => null);
+    if (!res?.ok) return setError("Could not save categories. Names must be 1–30 characters and unique.");
+    setError("");
+    onCategories(next);
+    onChanged(); // expenses of a removed category moved to Other, so reload them
+  }
+
+  async function addCategory(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newCategory.trim().replace(/\s+/g, " ");
+    if (!name) return;
+    if (categories.some((c) => c.toLowerCase() === name.toLowerCase())) return setError(`"${name}" already exists.`);
+    await saveCategories([...categories, name]);
+    setNewCategory("");
+  }
+
+  async function removeCategory(name: string) {
+    setRemovingCategory(null);
+    await saveCategories(categories.filter((c) => c !== name));
   }
 
   const startEdit = (r: Rec) => {
@@ -68,10 +95,10 @@ export default function SettingsDialog({ open, onOpenChange, currency, onCurrenc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] gap-6 overflow-y-auto p-6 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Appearance, currency and recurring expenses.</DialogDescription>
+          <DialogDescription>Appearance, currency, categories and recurring expenses.</DialogDescription>
         </DialogHeader>
 
         <section className="flex items-center justify-between gap-3">
@@ -87,7 +114,34 @@ export default function SettingsDialog({ open, onOpenChange, currency, onCurrenc
           </Select>
         </section>
 
-        <section className="grid gap-2">
+        <section className="grid gap-3">
+          <div>
+            <h3 className="text-sm font-medium">Categories</h3>
+            <p className="text-sm text-muted-foreground">Removing a category moves its expenses to &ldquo;{FALLBACK_CATEGORY}&rdquo;.</p>
+          </div>
+          <ul className="flex flex-wrap gap-2">
+            {categories.map((c) => (
+              <li key={c} className="flex items-center gap-1.5 rounded-full border py-1 pr-1 pl-2.5 text-sm">
+                <CategoryIcon category={c} className="size-5 [&_svg]:size-3" />
+                {c}
+                {c === FALLBACK_CATEGORY ? <span className="size-7" /> : removingCategory === c ? (
+                  <span className="flex items-center gap-1">
+                    <Button size="xs" variant="outline" onClick={() => setRemovingCategory(null)}>Keep</Button>
+                    <Button size="xs" variant="destructive" onClick={() => removeCategory(c)}>Remove</Button>
+                  </span>
+                ) : (
+                  <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => setRemovingCategory(c)} aria-label={`Remove category ${c}`}><X /></Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <form onSubmit={addCategory} className="flex gap-2">
+            <Input aria-label="New category name" placeholder="New category" maxLength={30} className="h-10" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
+            <Button type="submit" className="h-10" disabled={!newCategory.trim()}><Plus /> Add</Button>
+          </form>
+        </section>
+
+        <section className="grid gap-3">
           <div>
             <h3 className="text-sm font-medium">Recurring expenses</h3>
             <p className="text-sm text-muted-foreground">Monthly ones are added automatically each month, and edits apply to future months only. Weekly and yearly ones are shown as a share of whatever period you view, so edits apply to all of it.</p>
@@ -103,7 +157,7 @@ export default function SettingsDialog({ open, onOpenChange, currency, onCurrenc
                   <Input aria-label={`Amount (${currency})`} type="number" min="0.01" step="0.01" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
                   {r.frequency === "monthly" && <Input aria-label="Day of month" type="number" min="1" max="31" value={draft.day} onChange={(e) => setDraft({ ...draft, day: e.target.value })} />}
                 </div>
-                <CategorySelect value={draft.category} onChange={(category) => setDraft({ ...draft, category })} />
+                <CategorySelect categories={categories} value={draft.category} onChange={(category) => setDraft({ ...draft, category })} />
                 <div className="flex justify-end gap-1">
                   <Button size="sm" variant="outline" onClick={() => { setEditing(null); setError(""); }}><X /> Cancel</Button>
                   <Button size="sm" onClick={() => save(r.id)}><Check /> Save</Button>

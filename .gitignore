@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+.env
+.env.*
+!.env.example
+
+# Personal Claude overrides
+.claude/settings.local.json
+CLAUDE.local.md
+data/
+.env.local
+*.tsbuildinfo
+next-env.d.ts

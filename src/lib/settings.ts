@@ -2,17 +2,10 @@ import { db } from "./db";
 import { DEFAULT_CURRENCY, isCurrency } from "./currency";
 import { CATEGORIES, FALLBACK_CATEGORY, cleanCategories } from "./categories";
 
-export async function getCurrency(): Promise<string> {
-  const r = await (await db()).execute("SELECT value FROM settings WHERE key = 'currency'");
-  const v = r.rows[0]?.value;
+/** The display currency comes from the CURRENCY environment variable (default PHP); it isn't changeable in the app. */
+export function getCurrency(): string {
+  const v = process.env.CURRENCY?.trim().toUpperCase();
   return isCurrency(v) ? v : DEFAULT_CURRENCY;
-}
-
-export async function setCurrency(currency: string) {
-  await (await db()).execute({
-    sql: "INSERT INTO settings (key, value) VALUES ('currency', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    args: [currency],
-  });
 }
 
 export async function getCategories(): Promise<string[]> {

@@ -102,3 +102,8 @@ export function parseStatementText(text: string): RawTx[] {
   }
   return rows;
 }
+
+/** Keeps only money spent: drops credits, payments, refunds, zero amounts and interest or finance charges. */
+export function onlyExpenses(rows: RawTx[]): RawTx[] {
+  return rows.filter((r) => r.amount_cents > 0 && !/\b(interest|finance charge)\b/i.test(r.description));
+}

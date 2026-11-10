@@ -13,19 +13,37 @@ import { CategoryIcon, categoryStyle } from "@/components/category-icon";
 import AddExpenseDialog from "./AddExpenseDialog";
 import SettingsDialog from "./SettingsDialog";
 import EditExpenseDialog from "./EditExpenseDialog";
+import { CategorySelect } from "./CategorySelect";
 
 type Expense = { id: number; date: string; description: string; amount_cents: number; category: string };
 const UNDO_MS = 6000;
 // A weekly or yearly recurring expense's share of the viewed period; it is computed, not stored.
 type Row = Expense & { share?: Frequency };
 type RecurringItem = { id: number; description: string; amount_cents: number; category: string; start_date: string; frequency: Frequency };
-type Mode = "month" | "day" | "range";
+type Sort = "newest" | "oldest" | "highest" | "lowest" | "category";
+const SORT_ITEMS: { value: Sort; label: string }[] = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "highest", label: "Highest amount" },
+  { value: "lowest", label: "Lowest amount" },
+  { value: "category", label: "Category" },
+];
+const byDateDesc = (a: Row, b: Row) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id);
+const COMPARE: Record<Sort, (a: Row, b: Row) => number> = {
+  newest: byDateDesc,
+  oldest: (a, b) => byDateDesc(b, a),
+  highest: (a, b) => b.amount_cents - a.amount_cents,
+  lowest: (a, b) => a.amount_cents - b.amount_cents,
+  category: (a, b) => a.category.localeCompare(b.category) || b.amount_cents - a.amount_cents,
+};
+type Mode = "month" | "day" | "range" | "all";
 
 export default function Tracker({ initialCurrency, initialCategories }: { initialCurrency: string; initialCategories: string[] }) {
   const router = useRouter();
   const [all, setAll] = useState<Expense[]>([]);
-  const [currency, setCurrency] = useState(initialCurrency);
+  const currency = initialCurrency;
   const [categories, setCategories] = useState(initialCategories);
+  const [sort, setSort] = useState<Sort>("newest");
   const [editing, setEditing] = useState<Expense | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -77,14 +95,20 @@ export default function Tracker({ initialCurrency, initialCategories }: { initia
   const months = useMemo(() => [...new Set(all.map((e) => e.date.slice(0, 7)))].sort().reverse(), [all]);
   const activeMonth = month || months[0] || todayISO().slice(0, 7);
   const [from, to] =
-    mode === "month" ? [`${activeMonth}-01`, `${activeMonth}-31`] : mode === "day" ? [day, day] : [range.from, range.to];
+    mode === "month" ? [`${activeMonth}-01`, `${activeMonth}-31`]
+    : mode === "day" ? [day, day]
+    : mode === "all" ? ["0000-01-01", "9999-12-31"]
+    : [range.from, range.to];
 
   const realRows = useMemo(() => all.filter((e) => e.date >= from && e.date <= to), [all, from, to]);
   const shares = useMemo<Row[]>(() => recs.filter((r) => r.frequency !== "monthly").flatMap((r) => {
-    const cents = periodShareCents(r.amount_cents, r.frequency, r.start_date, from, to, mode === "month");
+    const cents = periodShareCents(r.amount_cents, r.frequency, r.start_date, from, mode === "all" ? todayISO() : to, mode === "month");
     return cents > 0 ? [{ id: -r.id, date: from, description: r.description, amount_cents: cents, category: r.category, share: r.frequency }] : [];
   }), [recs, from, to, mode]);
   const rows = useMemo<Row[]>(() => [...realRows, ...shares], [realRows, shares]);
+  // Recurring shares have no real date, so in the date sorts they stay at the end.
+  const sortedRows = useMemo(() => [...rows].sort((a, b) =>
+    (sort === "newest" || sort === "oldest") && !!a.share !== !!b.share ? (a.share ? 1 : -1) : COMPARE[sort](a, b)), [rows, sort]);
   const total = rows.reduce((s, e) => s + e.amount_cents, 0);
   const byCat = useMemo(() => {
     const m = new Map<string, number>();
@@ -97,10 +121,16 @@ export default function Tracker({ initialCurrency, initialCategories }: { initia
     return [...m.entries()].sort((a, b) => b[1].cents - a[1].cents)[0];
   }, [realRows]);
 
-  const periodLabel = mode === "month" ? fmtMonth(activeMonth) : mode === "day" ? fmtDate(day) : from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`;
+  const periodLabel = mode === "all" ? "All time" : mode === "month" ? fmtMonth(activeMonth) : mode === "day" ? fmtDate(day) : from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`;
   const monthItems = (months.length ? months : [activeMonth]).map((m) => ({ value: m, label: fmtMonth(m) }));
 
   const onAdded = (ym?: string) => { if (ym) { setMode("month"); setMonth(ym); } load(); };
+  const setCategory = async (e: Expense, category: string) => {
+    setAll((a) => a.map((x) => (x.id === e.id ? { ...x, category } : x)));
+    const body = { date: e.date, description: e.description, amount: e.amount_cents / 100, category };
+    const res = await fetch(`/api/expenses/${e.id}`, { method: "PATCH", body: JSON.stringify(body) }).catch(() => null);
+    if (!res?.ok) load(); // resync so the UI doesn't show a change that wasn't saved
+  };
   const remove = (e: Expense) => {
     if (pendingRef.current) { clearTimeout(undoTimer.current); commitDelete(pendingRef.current); }
     pendingRef.current = e;
@@ -140,9 +170,9 @@ export default function Tracker({ initialCurrency, initialCategories }: { initia
         <CardHeader className="gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex gap-1" role="group" aria-label="Summary period">
-              {(["month", "day", "range"] as Mode[]).map((m) => (
+              {(["month", "day", "range", "all"] as Mode[]).map((m) => (
                 <Button key={m} size="sm" variant={mode === m ? "default" : "outline"} aria-pressed={mode === m} onClick={() => setMode(m)}>
-                  {m === "month" ? "Month" : m === "day" ? "Day" : "Range"}
+                  {m === "month" ? "Month" : m === "day" ? "Day" : m === "range" ? "Range" : "All"}
                 </Button>
               ))}
             </div>
@@ -197,20 +227,33 @@ export default function Tracker({ initialCurrency, initialCategories }: { initia
       </Card>
 
       <section className="grid gap-4" aria-labelledby="tx-heading">
-        <h2 id="tx-heading" className="flex items-center gap-2 text-base font-medium"><CalendarDays className="size-4" /> Transactions · {periodLabel}</h2>
-        <ul className="grid gap-4">
-          {rows.map((e) => (
-            <li key={e.id} className="grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1.5 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-              <span className="text-xs text-muted-foreground">{e.share ? `${FREQUENCY_LABEL[e.share]} share` : fmtDate(e.date)}</span>
-              <span className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground">
-                <CategoryIcon category={e.category} className="size-5 [&_svg]:size-3" />
-                {e.category}
-              </span>
-              <span className="line-clamp-2 min-w-0 text-base font-semibold" title={e.description}>{e.description}</span>
-              <strong className="text-right text-base tabular-nums">{money(e.amount_cents)}</strong>
-              <div className="col-span-2 mt-2 flex items-center justify-end gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="tx-heading" className="flex items-center gap-2 text-base font-medium"><CalendarDays className="size-4" /> Transactions · {periodLabel}</h2>
+          <Select items={SORT_ITEMS} value={sort} onValueChange={(v) => v && setSort(v as Sort)}>
+            <SelectTrigger size="sm" className="w-40" aria-label="Sort transactions"><SelectValue /></SelectTrigger>
+            <SelectContent>{SORT_ITEMS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <ul className="grid gap-3">
+          {sortedRows.map((e) => (
+            <li key={e.id} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-0.5 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
+              <span className="line-clamp-2 min-w-0 text-lg leading-snug font-semibold" title={e.description}>{e.description}</span>
+              <strong className="text-right text-lg tabular-nums">{money(e.amount_cents)}</strong>
+              <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <CategoryIcon category={e.category} className="size-5 shrink-0 [&_svg]:size-3" />
                 {e.share ? (
-                  <span className="text-xs text-muted-foreground">Recurring · edit in Settings</span>
+                  <span className="truncate">{FREQUENCY_LABEL[e.share]} share · {e.category}</span>
+                ) : (
+                  <>
+                    <span className="shrink-0">{fmtDate(e.date)} ·</span>
+                    <CategorySelect size="sm" label={`Category of ${e.description}`} categories={categories} value={e.category} onChange={(c) => setCategory(e, c)}
+                      className="h-7 w-auto min-w-0 gap-1 border-transparent bg-transparent px-1.5 text-xs shadow-none hover:bg-muted dark:bg-transparent dark:hover:bg-muted" />
+                  </>
+                )}
+              </span>
+              <div className="-my-1 -mr-2 flex items-center justify-end">
+                {e.share ? (
+                  <span className="pr-2 text-xs text-muted-foreground">Edit in Settings</span>
                 ) : (
                   <>
                     <Button variant="ghost" size="icon" onClick={() => setEditing(e)} aria-label={`Edit ${e.description}`}><Pencil /></Button>
@@ -233,7 +276,7 @@ export default function Tracker({ initialCurrency, initialCategories }: { initia
 
       <AddExpenseDialog open={addOpen} onOpenChange={setAddOpen} currency={currency} categories={categories} onChanged={onAdded} />
       <EditExpenseDialog expense={editing} onClose={() => setEditing(null)} currency={currency} categories={categories} onSaved={load} />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} currency={currency} onCurrency={setCurrency} categories={categories} onCategories={setCategories} onChanged={load} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} currency={currency} categories={categories} onCategories={setCategories} onChanged={load} />
     </main>
   );
 }

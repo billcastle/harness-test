@@ -7,5 +7,5 @@ export const dynamic = "force-dynamic";
 
 export default async function Page() {
   if (!(await isAuthed())) redirect("/");
-  return <Tracker initialCurrency={await getCurrency()} initialCategories={await getCategories()} />;
+  return <Tracker initialCurrency={getCurrency()} initialCategories={await getCategories()} />;
 }

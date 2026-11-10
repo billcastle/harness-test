@@ -11,6 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DatePicker } from "@/components/date-picker";
 import { CategorySelect } from "./CategorySelect";
+import StatementReview, { type ReviewRow } from "./StatementReview";
+
+type ParsedTx = { date: string; description: string; amount_cents: number; category: string; hash: string; duplicate: boolean };
 
 type Props = {
   open: boolean;
@@ -27,10 +30,11 @@ export default function AddExpenseDialog({ open, onOpenChange, currency, categor
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [review, setReview] = useState<ReviewRow[] | null>(null);
   // The category list can change in Settings while this form is kept in memory.
   const category = categories.includes(form.category) ? form.category : (categories[0] ?? "Other");
 
-  const change = (o: boolean) => { if (o) { setForm(blank()); setError(""); setMsg(""); } onOpenChange(o); };
+  const change = (o: boolean) => { if (o) { setForm(blank()); setError(""); setMsg(""); setReview(null); } onOpenChange(o); };
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -52,16 +56,35 @@ export default function AddExpenseDialog({ open, onOpenChange, currency, categor
     const j = await res.json().catch(() => ({}));
     e.target.value = ""; setBusy(false);
     if (!res.ok) { setMsg(""); return setError(j.error || "Upload failed"); }
-    setMsg(`Added ${j.added} expenses${j.duplicates ? ` (${j.duplicates} already existed)` : ""}.`);
-    onChanged();
+    // Nothing is saved yet: the parsed transactions are shown for review first.
+    setMsg("");
+    setReview((j.transactions as ParsedTx[]).map((t, key) => ({
+      key, include: !t.duplicate, duplicate: t.duplicate, date: t.date, description: t.description,
+      amount: (t.amount_cents / 100).toFixed(2), category: t.category, hash: t.hash,
+    })));
+  }
+
+  async function saveReview() {
+    const chosen = (review ?? []).filter((r) => r.include && !r.duplicate);
+    if (!chosen.length) return;
+    setBusy(true); setError("");
+    const res = await fetch("/api/upload/save", {
+      method: "POST",
+      body: JSON.stringify({ transactions: chosen.map(({ date, description, amount, category, hash }) => ({ date, description, amount, category, hash })) }),
+    }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) return setError("Could not save these expenses. Check the rows and try again.");
+    onChanged(chosen.map((r) => r.date).sort().at(-1)?.slice(0, 7));
+    setReview(null);
+    onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="max-h-[90vh] gap-6 overflow-y-auto p-6 sm:max-w-lg">
+      <DialogContent className={`max-h-[90vh] gap-6 overflow-y-auto p-6 ${review ? "sm:max-w-2xl" : "sm:max-w-lg"}`}>
         <DialogHeader className="gap-1.5">
           <DialogTitle className="text-lg">Add expenses</DialogTitle>
-          <DialogDescription>Enter one expense, or upload your credit card statement.</DialogDescription>
+          <DialogDescription>Enter one expense, or upload a statement and review it before saving.</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="manual" className="gap-6">
           <TabsList className="w-full group-data-horizontal/tabs:h-11">
@@ -110,10 +133,15 @@ export default function AddExpenseDialog({ open, onOpenChange, currency, categor
           </TabsContent>
 
           <TabsContent value="upload" className="grid gap-3">
+            {review ? (
+              <StatementReview rows={review} onChange={setReview} categories={categories} currency={currency} saving={busy} error={error}
+                onCancel={() => { setReview(null); setError(""); }} onSave={saveReview} />
+            ) : (<>
             <Input type="file" accept=".csv,.pdf,text/csv,application/pdf" className="h-11 py-2" onChange={upload} disabled={busy} aria-label="Statement file" />
-            <p className="text-sm text-muted-foreground">CSV works best; text-based PDFs are supported too. Payments and refunds are skipped, and re-uploading a statement won&apos;t add duplicates.</p>
+            <p className="text-sm text-muted-foreground">CSV works best; text-based PDFs are supported too. Payments, refunds and interest are skipped. You&apos;ll review the transactions before anything is added, and ones you&apos;ve already uploaded are flagged.</p>
             {msg && <p className="text-sm" role="status">{msg}</p>}
             {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+            </>)}
           </TabsContent>
         </Tabs>
       </DialogContent>

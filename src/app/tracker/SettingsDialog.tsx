@@ -1,14 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
-import { CURRENCIES, formatMoney } from "@/lib/currency";
+import { formatMoney } from "@/lib/currency";
 import type { Frequency } from "@/lib/amortize";
 import { fmtDate } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryIcon } from "@/components/category-icon";
 import { FALLBACK_CATEGORY } from "@/lib/categories";
 import { ThemeChoice } from "../ThemeToggle";
@@ -18,20 +17,18 @@ type Rec = { id: number; description: string; amount_cents: number; category: st
 type Draft = { description: string; amount: string; category: string; day: string };
 
 const ordinal = (n: number) => `${n}${["th", "st", "nd", "rd"][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10 < 4 ? n % 10 : 0]}`;
-const currencyItems = CURRENCIES.map((c) => ({ value: c, label: c }));
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currency: string;
-  onCurrency: (currency: string) => void;
   categories: string[];
   onCategories: (categories: string[]) => void;
   /** Called when a recurring expense was edited or deleted. */
   onChanged: () => void;
 };
 
-export default function SettingsDialog({ open, onOpenChange, currency, onCurrency, categories, onCategories, onChanged }: Props) {
+export default function SettingsDialog({ open, onOpenChange, currency, categories, onCategories, onChanged }: Props) {
   const [recs, setRecs] = useState<Rec[] | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>({ description: "", amount: "", category: "Other", day: "1" });
@@ -45,13 +42,6 @@ export default function SettingsDialog({ open, onOpenChange, currency, onCurrenc
     if (res.ok) setRecs(await res.json());
   }, []);
   useEffect(() => { if (open) { setEditing(null); setConfirming(null); setRemovingCategory(null); setError(""); loadRecs(); } }, [open, loadRecs]);
-
-  async function pickCurrency(c: string) {
-    const prev = currency;
-    onCurrency(c);
-    const res = await fetch("/api/settings", { method: "PUT", body: JSON.stringify({ currency: c }) });
-    if (!res.ok) { onCurrency(prev); setError("Could not save currency"); }
-  }
 
   async function saveCategories(next: string[]) {
     const res = await fetch("/api/settings", { method: "PUT", body: JSON.stringify({ categories: next }) }).catch(() => null);
@@ -98,20 +88,12 @@ export default function SettingsDialog({ open, onOpenChange, currency, onCurrenc
       <DialogContent className="max-h-[90vh] gap-6 overflow-y-auto p-6 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Appearance, currency, categories and recurring expenses.</DialogDescription>
+          <DialogDescription>Appearance, categories and recurring expenses.</DialogDescription>
         </DialogHeader>
 
         <section className="flex items-center justify-between gap-3">
           <Label>Theme</Label>
           <ThemeChoice />
-        </section>
-
-        <section className="flex items-center justify-between gap-3">
-          <Label>Currency</Label>
-          <Select items={currencyItems} value={currency} onValueChange={(v) => v && pickCurrency(v)}>
-            <SelectTrigger className="w-28" aria-label="Currency"><SelectValue /></SelectTrigger>
-            <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-          </Select>
         </section>
 
         <section className="grid gap-3">
